@@ -1,63 +1,85 @@
-import time
-import pyautogui as ag
+import pyautogui
 import serial
 import numpy
+import pyautogui as ag
+from collections import deque
+import threading
+import processButtons
 
-ser = serial.Serial('COM5',9600, timeout = 1)
-time.sleep(2)
+maxDelay = 8
+maxButtons = 5
+keyMat = numpy.zeros((maxDelay,maxButtons))
+lenJSHex = 10
+JSMode = True
 
-joystickMode = False
+ser = serial.Serial('COM5',9600,timeout=1)
+
+def processButton(button):
+    # print(keyMat)
+
+    buttonMap = {0 : 'q', 1 : 'w', 2 : 'e', 3 : 'r'}
+    if button == 4:
+        ag.click()
+        return
+    ag.press(buttonMap.get(button))
+
+buffer = deque(maxlen=1)
+
+def processJS(x,y):
+
+    if JSMode:
+        x_new = 0
+        y_new = 0
+        if x > 812:
+            x_new = 40
+        elif x <= 812 and x > 512:
+            x_new= 20
+        elif x < 212:
+            x_new = - 40
+        elif x >= 212 and x < 512:
+            x_new = -20
+        if y > 812:
+            y_new = 40
+        elif y <= 812 and y > 512:
+            y_new = 20
+        elif y < 212:
+            y_new = -40
+        elif y >= 212 and y < 512:
+            y_new = -20
+        ag.moveRel(x_new, y_new)
+    else:
+        if x > 512:
+            ag.press('right')
+        elif x < 512:
+            ag.press('left')
+        if y > 512:
+            ag.press('down')
+        elif y < 512:
+            ag.press('up')
 
 
-holdDetection = dict()
-lastPressed = list()
+def bufferProcces():
+    while True:
 
-for i in range(5):
-    holdDetection[i] = 0
-    lastPressed.append(0)
-    lastPressed[i] = 0
-prevNum = 0
+        for line in list(buffer):
+            # print(line)qweqwe
+            processButtons.process_line(line,keyMat)
+
+            if line.isnumeric() and int(line) != 0:
+
+                num = int(line)
+                buttons = num & (2 ** maxButtons - 1)
+                x_pos = (num >> maxButtons) & (2 ** lenJSHex - 1)
+                y_pos = (num >> (maxButtons + lenJSHex)) & (2 ** lenJSHex - 1)
+                processJS(x_pos,y_pos)
+                # print(f'b {buttons}')
+                #r
+                # print(num)
+
+thread = threading.Thread(target=bufferProcces)
+thread.start()
 
 while True:
-    line = ser.readline().decode('utf-8').strip()
-    if line.strip() == '':
-        continue
     if ser.in_waiting > 0:
-        if not line.isnumeric():
-            x_pos = 550
-            y_pos = 550
-            if line[0] == 'x':
-                x_pos = int(line[1:])
-            if line[0] == 'y':
-                y_pos = int(line[1:])
-            if joystickMode:
-                print()
-            else:
-                if x_pos > 900:
-                    ag.press('right')
-                if x_pos < 200:
-                    ag.press('left')
-                continue
-
-        num = int(line)
-
-        dtime = time.process_time() - lastPressed[num]
-        if dtime > .5:
-            holdDetection[num] = 0
-        holdDetection[num] += 1
-        if holdDetection[num] == 0 or holdDetection[num] > 5 or num != prevNum:
-            for i in range(5):
-                if i != num:
-                    holdDetection[i] = 0
-
-            if num == 1:
-                ag.press('c')
-            if num == 2:
-                ag.press('z')
-            if num == 3:
-                ag.press('up')
-            if num == 4:
-                ag.press('down')
-            if num == 0:
-                ag.press('space')
-        prevNum = num
+        lineSer = ser.readline().decode('utf-8').strip()
+        buffer.append(lineSer)
